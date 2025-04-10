@@ -14,10 +14,10 @@ u_max = 1.5;
 Ts = 0.1; 
 
 % data
-bag = rosbag('robot_control_2025-02-28-19-02-25.bag');
-bagInfo = rosbag('info','robot_control_2025-02-28-19-02-25.bag');
-bag_p = rosbag('robot_state_2025-02-28-19-02-25.bag');
-bagInfo_p = rosbag('info','robot_state_2025-02-28-19-02-25.bag');
+bag = rosbag('robot_control_2025-02-28-20-22-25.bag');
+bagInfo = rosbag('info','robot_control_2025-02-28-20-22-25.bag');
+bag_p = rosbag('robot_state_2025-02-28-20-22-24.bag');
+bagInfo_p = rosbag('info','robot_state_2025-02-28-20-22-24.bag');
 
 bSel_des = select(bag,'Topic','/cmd_vel/controller/filter_data');
 bSel = select(bag,'Topic','/real/cmd_vel');
@@ -57,8 +57,8 @@ var_y = cellfun(@(m) double(m.Pose.Covariance(8)), msgStructs_pose);    % varian
 var_z = cellfun(@(m) double(m.Pose.Covariance(15)), msgStructs_pose);   % variance of z
 
 % velocities
-% vx_d = cellfun(@(m) double(m.ULinearVelocityBaseline),msgStructs_des); % unsafe velocity
-% w_d = cellfun(@(m) double(m.UAngularVelocityBaseline),msgStructs_des); % unsafe angular
+vx_d = cellfun(@(m) double(m.ULinearVelocityBaseline),msgStructs_des); % unsafe velocity
+w_d = cellfun(@(m) double(m.UAngularVelocityBaseline),msgStructs_des); % unsafe angular
 v_r = cellfun(@(m) double(m.ULinearVelocityFiltered),msgStructs_des); % safe velocity
 w_r = cellfun(@(m) double(m.UAngularVelocityFiltered),msgStructs_des); % safe angular vel.
 % vx_r = cellfun(@(m) double(m.ULinearVelocityFiltered),msgStructs_des); % safe velocity
@@ -83,23 +83,50 @@ alpha_h =  1;
 c = 2 * pi / 6;
 b = 0;
 a = 0.0;
-d = 0.5; % safety boundary radius
-h_values = d^2 - (y_p - sin(c * x_p + b) - a).^2;
+d = 1; % safety boundary radius
+h_values = d^2 - y_p.^2;
 
 % plot CBF function h(x_p, y_p)
-figure('Position',[80 80 800 400]);
-hold on;
-plot(x_p, h_values, 'k', 'DisplayName', 'CBF $h(x, y)$');
-xlabel('$x_p \ [m]$');
-xlim([min(x_p), max(x_p)])
-ylabel('$h(x, y)$');
+% figure('Position',[80 80 800 400]);
+figure('Position',[80 80 800 600]); hold on; box on;
+subplot(3,1,1);
+hold on; box on;
+plot(t', h_value, 'k', 'DisplayName', 'CBF $h(x, y)$');
+xlabel('$t \ [s]$');
+% xlim([min(x_p), max(x_p)])
+ylabel('$h(t)$');
 % title('$h(x)$');
 %grid on;
 legend;
-hold off;
+% hold off;
+
+
+% plot k_des and k_safe
+% figure('Position',[80 80 800 400]);
+subplot(3,1,2); hold on; box on;
+plot(t', vx_d, 'k', 'DisplayName', '$k_{nom}$');
+plot(t', v_r, 'b', 'DisplayName', '$k_{QP}$');
+xlabel('$t \ [s]$');
+% xlim([min(x_p), max(x_p)])
+ylabel('$v \ [m/s]$');
+% title('$h(x)$');
+%grid on;
+legend;
+% hold off;
+
+subplot(3,1,3); hold on; box on;
+plot(t', w_d, 'k', 'DisplayName', '$k_{nom}$');
+plot(t', w_r, 'b', 'DisplayName', '$k_{QP}$');
+xlabel('$t \ [s]$');
+% xlim([min(x_p), max(x_p)])
+ylabel('$\omega \ [rad/s]$');
+% title('$h(x)$');
+%grid on;
+legend;
 
 % safety
-figure('Position',[100 100 800 600]); hold on;
+figure('Position',[200 100 800 600]); hold on; box on;
+% subplot(4,1,1); hold on; box on;
 
 % uncertainty region
 upper_bound = y_p + sqrt(var_y);
@@ -107,16 +134,16 @@ lower_bound = y_p - sqrt(var_y);
 
 % safe region based on the CBF (d = 0.5)
 x_safe = linspace(min(x_p)-0.0, max(x_p)+0.0, 500);
-y_safe_upper = sin(c * x_safe + b) + a + 0.5;
-y_safe_lower = sin(c * x_safe + b) + a - 0.5;
+y_safe_upper = 0 * sin(c * x_safe + b) + a + 1;
+y_safe_lower = 0 * sin(c * x_safe + b) + a - 1;
 
 % safe region (shaded area)
 fill([x_safe, fliplr(x_safe)], [y_safe_upper, fliplr(y_safe_lower)],...
      [0.8, 1.0, 0.8], 'EdgeColor', 'none', 'DisplayName', 'safe set');
 
 % safe boundary lines (d = 1)
-y_safe_upper_d1 = sin(c * x_safe + b) + a + 1;
-y_safe_lower_d1 = sin(c * x_safe + b) + a - 1;
+y_safe_upper_d1 = 0 * sin(c * x_safe + b) + a + 1;
+y_safe_lower_d1 = 0 * sin(c * x_safe + b) + a - 1;
 plot(x_safe, y_safe_upper_d1, '--r', 'LineWidth', 1.5, 'DisplayName','safe boundary d=1');
 plot(x_safe, y_safe_lower_d1, '--r', 'LineWidth', 1.5, 'HandleVisibility','off');
 
@@ -126,14 +153,14 @@ fill([x_p; flipud(x_p)], [upper_bound; flipud(lower_bound)],...
 
 %breference path from simulation
 x_ref_vals = linspace(min(x_p), max(x_p), 500);
-y_ref_vals = sin(c * x_ref_vals);
+y_ref_vals = 1.5 * sin(c * x_ref_vals);
 plot(x_ref_vals, y_ref_vals, 'k--', 'LineWidth',1.5, 'DisplayName','reference path');
 
 % robot trajectory
 plot(x_p, y_p, 'b', 'LineWidth', 2, 'DisplayName', 'robot path');
 
 % safety function
-text(mean(x_safe)+1.2, max(y_safe_upper_d1)-0.3,'$h(x,y) = d^2 - (y - \sin(cx + b) - a)^2$',...
+text(mean(x_safe)+1.2, max(y_safe_upper_d1)-0.3,'$h(x,y) = d^2 - y^2$',...
     'Interpreter','latex','FontSize',14,'HorizontalAlignment','center');
 
 xlabel('$x_p \ [m]$');

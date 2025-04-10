@@ -1,12 +1,12 @@
 function unicyle_control()
     dt          = 0.1;  
-    total_time  = 8;   
+    total_time  = 30;   
     steps       = round(total_time / dt);
 
     Kv   = 1.0;
     Kom  = 1.5;
 
-    v_ref = 1.2;       
+    v_ref = 0.3;       
     c  = 2*pi / 6;  
 
     state = [0; 0; 0];  
@@ -23,7 +23,7 @@ function unicyle_control()
         t = (k-1) * dt;
 
         x_des = x_init + v_ref * t;
-        y_des = sin(c * x_des);
+        y_des = 1.5 * sin(c * x_des);
 
         x    = state(1);
         y    = state(2);
@@ -55,7 +55,7 @@ function unicyle_control()
          'LineWidth',1.5, 'DisplayName','robot path');
 
     x_ref_vals = x_init + v_ref .* time_data;
-    y_ref_vals = sin(c * x_ref_vals);
+    y_ref_vals = 1.5 * sin(c * x_ref_vals);
     plot(x_ref_vals, y_ref_vals, 'k--', 'LineWidth',1.5, 'DisplayName','reference');
 
     xlabel('x_p');
