@@ -14,10 +14,10 @@ u_max = 1.5;
 Ts = 0.1; 
 
 % data
-bag = rosbag('robot_control_2025-02-28-20-22-25.bag');
-bagInfo = rosbag('info','robot_control_2025-02-28-20-22-25.bag');
-bag_p = rosbag('robot_state_2025-02-28-20-22-24.bag');
-bagInfo_p = rosbag('info','robot_state_2025-02-28-20-22-24.bag');
+bag = rosbag('robot_control_2025-02-28-19-32-39.bag');
+bagInfo = rosbag('info','robot_control_2025-02-28-19-32-39.bag');
+bag_p = rosbag('robot_state_2025-02-28-19-32-39.bag');
+bagInfo_p = rosbag('info','robot_state_2025-02-28-19-32-39.bag');
 
 bSel_des = select(bag,'Topic','/cmd_vel/controller/filter_data');
 bSel = select(bag,'Topic','/real/cmd_vel');

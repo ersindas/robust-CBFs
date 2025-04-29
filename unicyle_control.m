@@ -1,78 +1,103 @@
-function unicyle_control()
-    dt          = 0.1;  
-    total_time  = 30;   
+function unicycle_control()
+    dt          = 0.1;           % sample time
+    total_time  = 40;            % [s]
     steps       = round(total_time / dt);
 
-    Kv   = 1.0;
-    Kom  = 1.5;
+    Kv   = 1.0;                  % speed gain
+    Kom  = 1.5;                  % heading gain
 
-    v_ref = 0.3;       
-    c  = 2*pi / 6;  
+    v_ref = 0.3;                 % forward ref speed for x_des(t)
+    c     = 2*pi/6;              % sinusoid frequency
 
-    state = [0; 0; 0];  
-    x_init = state(1);  
+    % safe-set corridor  h_lane = d^2 - y^2 >= 0
+    d_lane = 1;            % => corridor |y| <= 0.6 m
 
-    time_data = 0:dt:total_time;  
+    % two obstacles (same as ROS code)
+    obs   = [ 3.0 0.0 0.4 ;      % [x y R] obstacle-1
+              6.0 0.0 0.4 ];     % obstacle-2
+
+    %% ---------------- initial state & data storage -------------------
+    state = [0; 0; 0];          % start  2 m before first obstacle
+    x_init = state(1);
 
     state_history   = zeros(3, steps+1);
     state_history(:,1) = state;
-    control_history = zeros(2, steps);  
-    
+    control_history = zeros(2, steps);
+
+    %% ---------------- simulation loop --------------------------------
     for k = 1:steps
-       
         t = (k-1) * dt;
 
+        % reference trajectory (straight + sinusoid)
         x_des = x_init + v_ref * t;
-        y_des = 1.5 * sin(c * x_des);
+        y_des = 1.2 * sin(c * x_des);
 
-        x    = state(1);
-        y    = state(2);
-        psi  = wrap_to_pi(state(3));
+        % current state
+        x   = state(1);
+        y   = state(2);
+        psi = wrap_to_pi(state(3));
 
-        dx = x_des - x;
-        dy = y_des - y;
-        dist = sqrt(dx^2 + dy^2);
+        % pure-pursuit style controller
+        dx = x_des - x;  dy = y_des - y;
+        dist     = hypot(dx,dy);
+        theta_d  = wrap_to_pi(atan2(dy,dx));
 
-        theta_d = atan2(dy, dx);
-        theta_d = wrap_to_pi(theta_d);
+        v = Kv  * dist;
+        w = -Kom * wrap_to_pi(psi - theta_d);
 
-        v = Kv * dist;
-
-        heading_err = wrap_to_pi(psi - theta_d);
-        w = -Kom * heading_err;
-
+        % integrate unicycle dynamics
         state = unicycle_dynamics(state, [v; w], dt);
 
-        state_history(:,k+1)   = state;
-        control_history(:,k)   = [v; w];
+        % log
+        state_history(:,k+1) = state;
+        control_history(:,k) = [v; w];
     end
 
-    figure;
+    time = 0:dt:total_time;
 
-    subplot(2,1,1); hold on; box on;
+    figure('Name','Trajectory & Control');
+    subplot(2,1,1); hold on; box on; grid on;
+    title('Safe set, obstacles and robot path');
+    xlabel('\xi  (m)'); ylabel('\eta  (m)'); axis equal;
 
-    plot(state_history(1,:), state_history(2,:), 'b-', ...
-         'LineWidth',1.5, 'DisplayName','robot path');
+    % lane corridor (filled light-blue band)
+    fill([0 12 12 0],[-d_lane -d_lane d_lane d_lane], ...
+         [0.9 0.95 1],'EdgeColor','none','DisplayName','safe corridor');
 
-    x_ref_vals = x_init + v_ref .* time_data;
-    y_ref_vals = 1.5 * sin(c * x_ref_vals);
-    plot(x_ref_vals, y_ref_vals, 'k--', 'LineWidth',1.5, 'DisplayName','reference');
+    % corridor boundary dotted
+    plot([0 12],[ d_lane d_lane],'k--','HandleVisibility','off');
+    plot([0 12],[-d_lane -d_lane],'k--','HandleVisibility','off');
 
-    xlabel('x_p');
-    ylabel('y_p');
-    legend('Location','best');
+    % obstacles
+    th = linspace(0,2*pi,100);
+    for i = 1:size(obs,1)
+        xc = obs(i,1) + obs(i,3)*cos(th);
+        yc = obs(i,2) + obs(i,3)*sin(th);
+        plot(xc,yc,'r','LineWidth',1.6,'DisplayName','obstacle');
+        scatter(obs(i,1),obs(i,2),25,'k','filled','HandleVisibility','off');
+    end
 
-    subplot(2,1,2); hold on; box on;
+    % robot path
+    plot(state_history(1,:), state_history(2,:), 'b-', 'LineWidth',1.6,...
+         'DisplayName','robot path');
 
+    % reference trajectory
+    x_ref_vals = x_init + v_ref.*time;
+    y_ref_vals = 1.2 * sin(c * x_ref_vals);
+    plot(x_ref_vals, y_ref_vals, 'k--', 'LineWidth',1.2, ...
+         'DisplayName','reference');
+
+    legend('Location','NorthEast');
+
+    subplot(2,1,2); hold on; box on; grid on;
+    title('Desired control inputs (no safety filter)');
     control_time = 0:dt:(steps-1)*dt;
-
-    plot(control_time, control_history(1,:), 'r-', 'LineWidth',1.5, 'DisplayName','v(t)');
-    plot(control_time, control_history(2,:), 'b-', 'LineWidth',1.5, 'DisplayName','w(t)');
-
-    xlabel('Time [s]');
-    ylabel('v and w');
+    plot(control_time, control_history(1,:), 'r-', 'LineWidth',1.5, ...
+         'DisplayName','v(t)');
+    plot(control_time, control_history(2,:), 'b-', 'LineWidth',1.5, ...
+         'DisplayName','\omega(t)');
+    xlabel('time  (s)'); ylabel('[m/s]  &  [rad/s]');
     legend('Location','best');
-    % title('velocities');
 end
 
 function angle = wrap_to_pi(angle)
@@ -87,13 +112,9 @@ function new_state = unicycle_dynamics(state, control_input, dt)
     v     = control_input(1);
     omega = control_input(2);
 
-    x_dot     = v * cos(theta);
-    y_dot     = v * sin(theta);
-    theta_dot = omega;
-
-    x     = x + x_dot * dt;
-    y     = y + y_dot * dt;
-    theta = wrap_to_pi(theta + theta_dot * dt);
+    x     = x + v*cos(theta)*dt;
+    y     = y + v*sin(theta)*dt;
+    theta = wrap_to_pi(theta + omega*dt);
 
     new_state = [x; y; theta];
 end
