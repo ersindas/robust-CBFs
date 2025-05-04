@@ -163,8 +163,10 @@ for i in range(timesteps):
     # generate actual input in different cases
     if use_filter:
         # safety filter
-        control_actual = ssf_controller.control_ssf(state,u_nom, phi=0.0, psi=0.0, theta=0.0, dot_phi=0.0, dot_theta=0.0, dot_psi=0.0, ddot_psi=0.0, 
-                    ddot_theta =0.0, ddot_phi=0.0, acc_z=1.0, acc_y=0.0, dot_v=0.0)
+        # control_actual = ssf_controller.control_ssf(state,u_nom, phi=0.0, psi=0.0, theta=0.0, dot_phi=0.0, dot_theta=0.0, dot_psi=0.0, ddot_psi=0.0, 
+        #             ddot_theta =0.0, ddot_phi=0.0, acc_z=1.0, acc_y=0.0, dot_v=0.0)
+        # for the safety filter
+        control_actual = ssf_controller.control_ssf(state,u_nom)
     else:
         control_actual = u_nom
     
