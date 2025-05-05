@@ -77,20 +77,6 @@ def get_h0(h, x, y):
     return h0, dhdx, dhdy
 
 
-def obstacle_cbf(p_x, p_y, psi, o_x, o_y, R, delta):
-    """
-    returns:  h,   A (coeff of v),   B (coeff of omega)
-     """
-    dx, dy   = p_x - o_x, p_y - o_y
-    D        = np.hypot(dx, dy)
-    n_x, n_y = dx / D, dy / D
-    c        = n_x * np.cos(psi) + n_y * np.sin(psi)          
-    h        = D - R + delta * c
-    A        = c + delta * (1 - c**2) / D                         
-    B        = delta * (n_x * -np.sin(psi) + n_y * np.cos(psi))   
-    return h, A, B
-
-
 class SSF:
     """Robust Control Barrier Functions-Based Safety Filter
           SSF takes in the nominal control signal(u_nominal) and filters it to
