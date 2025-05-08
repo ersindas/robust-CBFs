@@ -9,10 +9,14 @@ import time as timer
 from types import SimpleNamespace
 import matplotlib.pyplot as plt
 import csv
+import os
 
 # logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
+file_path = os.path.join(script_dir, 'poisson_safety_grid_2_5.csv')
 
 
 class UnicycleModel:
@@ -331,7 +335,7 @@ grid_region = [[-1,10],[-2,2]]
 imax = 220.0 # Grid I Dimension (Negative Y-Direction)
 jmax = 1000.0 # Grid J Dimension (Positive X-Direction)
 # ds = 0.01 # Grid Resolution
-with open('poisson_safety_grid_2_5.csv', 'r') as file:
+with open(file_path, 'r') as file:
     reader = csv.reader(file)
     data = [[float(val) for val in row] for row in reader]
 
