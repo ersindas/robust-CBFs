@@ -3,7 +3,7 @@ from typing import List
 import itertools
 import logging
 # from safety_filterRAL_explicitH import SSF
-from safety_filterRAL_implicitH import SSF
+from safety_filterRAL_implicitH_modV import SSF
 from safety_filterRAL_implicitH import get_h0
 import time as timer
 from types import SimpleNamespace
@@ -107,11 +107,67 @@ class UnicycleModel:
         if wrapped == -np.pi: wrapped  = np.pi 
         return wrapped
 
-################################
+class SingleIntegratorModel:
+    '''
+    Single integrator ODE of the form:
+    
+    model inputs - vx, vy
+    states - x, y
+    measured outputs - x, y
+
+    \dot{x} = vx
+    \dot{y} = vy
+    '''
+
+    def __init__(self,parameters):
+        self.parameters = parameters
+        
+
+    # Runge-Kutta (4th-order)
+    def rk4(self, rhs, t_span, s0):
+        t0, tf = t_span
+        dt = tf - t0
+        s = s0
+        k1 = rhs(t0, s)
+        k2 = rhs(t0 + dt / 2, s + dt * k1 / 2)
+        k3 = rhs(t0 + dt / 2, s + dt * k2 / 2)
+        k4 = rhs(t0 + dt, s + dt * k3)
+        s_next = s + (dt / 6) * (k1 + 2 * k2 + 2 * k3 + k4)
+
+        return [s, s_next]
+    
+    def forward_euler(self,rhs,t_span,s0):
+        t0,tf = t_span
+        dt = tf - t0
+        s_next = s0 + rhs(t0,s0)*dt
+        return [s0, s_next]
+
+
+    def ode(self, x, u):
+        '''
+        RHS of ode
+            x - state
+            vx - x-axis velocity
+            vy - y-axis velocity
+        '''
+        vx, vy = u[0], u[1]
+        dxdt = np.zeros(2)
+        dxdt[0] = vx
+        dxdt[1] = vy
+        return dxdt
+    
+    def dt_dynamics(self,t,s,u):
+        rhs = lambda t,x: self.ode(x,u)
+        t_span = [t, t+self.parameters.sample_time]
+        [s, s_next] = self.rk4(rhs,t_span,s)
+        # [s, s_next] = self.forward_euler(rhs,t_span,s)
+        return s_next
+    
+############ tunable parameters ####
 y_mag = 1.5
 c = 3.0 * np.pi / 6 
 v_ref = 0.2
-delta_obs = 0.2
+delta_obs = 0.1
 
 obs_x  = np.array([2.5,  6.5])   
 obs_y  = np.array([0.0,  0.0])  
@@ -120,7 +176,12 @@ obs_R  = np.array([0.65,  0.65])
 
 
 # parameters
-x0 = np.array([0,0,0])
+control_type = 'single_integrator'
+if control_type=='unicycle':
+    x0 = np.array([0,0,0])
+if control_type == 'single_integrator':
+    x0 = np.array([0,0])
+
 total_time = 50
 T = 0.1
 use_filter = True
@@ -129,7 +190,8 @@ use_filter = True
 # sim with safety filter
 state = x0
 states = [state]
-
+ref_state = x0
+ref_states = [ref_state]
 
 nom_controls = []
 act_controls = []
@@ -147,6 +209,7 @@ tic = timer.time()
 input_bounds = np.array([[-5, 5], [-2, 2]])
 model_param = SimpleNamespace(sample_time = T,input_bounds = input_bounds, integration_method = 'RK45')
 unicyle = UnicycleModel(parameters=model_param)
+single_inte = SingleIntegratorModel(parameters=model_param)
 
 ssf_controller = SSF(v_ref=v_ref,delta_obs=delta_obs,
                      obs_x = obs_x, obs_y = obs_y)
@@ -155,30 +218,47 @@ ssf_controller.x_init = x0
 for i in range(timesteps):
     time = i*T
 
-    # generate nominal input in different cases
-    # x_ref = reference_path(time,reference_param)
-    state_2d = state.reshape(-1,1)
-    u_nom = ssf_controller.k_des(state_2d,time,y_mag = y_mag, c = c)
+    ######################## unicycle model ##########################
+    # # generate nominal input in different cases
+    # # x_ref = reference_path(time,reference_param)
+    # state_2d = state.reshape(-1,1)
+    # u_nom = ssf_controller.k_des(state_2d,time,y_mag = y_mag, c = c)
 
-    # generate actual input in different cases
+    # # generate actual input in different cases
+    # if use_filter:
+    #     # safety filter
+    #     # control_actual = ssf_controller.control_ssf(state,u_nom, phi=0.0, psi=0.0, theta=0.0, dot_phi=0.0, dot_theta=0.0, dot_psi=0.0, ddot_psi=0.0, 
+    #     #             ddot_theta =0.0, ddot_phi=0.0, acc_z=1.0, acc_y=0.0, dot_v=0.0)
+    #     # for the safety filter
+    #     control_actual = ssf_controller.control_ssf(state,u_nom)
+    # else:
+    #     control_actual = u_nom
+    
+    # # generate real and fake next states and corresponding measurement
+    # state_next = unicyle.dt_dynamics(time,state,control_actual)
+
+
+    ############################### single integrator model #############
+    state_2d = state.reshape(-1,1)
+    u_nom = ssf_controller.single_integrator_tracking_controller(state_2d,time,y_mag=y_mag, c= c)
+
     if use_filter:
-        # safety filter
-        # control_actual = ssf_controller.control_ssf(state,u_nom, phi=0.0, psi=0.0, theta=0.0, dot_phi=0.0, dot_theta=0.0, dot_psi=0.0, ddot_psi=0.0, 
-        #             ddot_theta =0.0, ddot_phi=0.0, acc_z=1.0, acc_y=0.0, dot_v=0.0)
-        # for the safety filter
-        control_actual = ssf_controller.control_ssf(state,u_nom)
+        control_actual = ssf_controller.single_integrator_safety_filter(state_2d,time,y_mag=y_mag, c= c)
     else:
         control_actual = u_nom
-    
-    # generate real and fake next states and corresponding measurement
-    state_next = unicyle.dt_dynamics(time,state,control_actual)
+    state_next = single_inte.dt_dynamics(time,state,control_actual)
 
     # logging
+    ref_state_x, ref_state_y = ssf_controller.xy_ref(state_2d,time,y_mag=y_mag, c= c)
+    ref_state = [ref_state_x,ref_state_y]
+
     h_val = ssf_controller.data_dict['h1'] # for plotting
     states.append(state_next)
+    ref_states.append(ref_state)
     nom_controls.append(u_nom)
     act_controls.append(control_actual)
     h_values.append(float(h_val)) 
+
 
     # ground-true
     state = state_next
@@ -190,6 +270,7 @@ for i in range(timesteps):
 
 # Convert lists to numpy arrays for easy indexing
 states = np.array(states)  # Shape (timesteps, state_dim)
+ref_states = np.array(ref_states)  # Shape (timesteps, state_dim)
 nom_controls = np.array(nom_controls)  # Shape (timesteps, control_dim)
 act_controls = np.array(act_controls)  # Shape (timesteps, control_dim)
 controls_filtered = np.array(controls_filtered)  # Shape (timesteps, control_dim)
@@ -209,7 +290,10 @@ time_axis = np.linspace(0, timesteps * T, timesteps)  # Time vector
 
 
 
-def plt_levelset(func, grid_region):
+def plt_levelset(func, grid_region,ax=None):
+    if ax is None:
+        ax = plt.gca()
+
     xlim = grid_region[0]
     ylim = grid_region[1]
     # Define grid
@@ -224,9 +308,9 @@ def plt_levelset(func, grid_region):
             Z[i, j] = func(X[i, j], Y[i, j])
     
     # Plot the level set
-    plt.contour(X, Y, Z, levels=[0], colors='r', linewidths=2, linestyles='dashed')
+    ax.contour(X, Y, Z, levels=[0], colors='r', linewidths=2, linestyles='dashed')
     # Add a label for the safety boundary
-    plt.text(xlim[0] + 0.3* (xlim[1] - xlim[0]), 3, 'Safety Boundary', 
+    ax.text(xlim[0] + 0.3* (xlim[1] - xlim[0]), 3, 'Safety Boundary', 
              color='r', fontsize=14, bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
 
 # Plot Trajectory
@@ -247,7 +331,7 @@ grid_region = [[-1,10],[-2,2]]
 imax = 220.0 # Grid I Dimension (Negative Y-Direction)
 jmax = 1000.0 # Grid J Dimension (Positive X-Direction)
 # ds = 0.01 # Grid Resolution
-with open('poisson_safety_grid.csv', 'r') as file:
+with open('poisson_safety_grid_2_5.csv', 'r') as file:
     reader = csv.reader(file)
     data = [[float(val) for val in row] for row in reader]
 
@@ -308,3 +392,99 @@ plt.title("Safety Constraint h over Time")
 plt.legend()
 plt.grid()
 plt.show()
+
+
+#################### animation ############################
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+
+fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+
+# Left subplot: Trajectory
+ax_traj = axs[0]
+ax_traj.plot(states[:, 0], states[:, 1], label='Ground-truth Trajectory')
+ax_traj.scatter(states[0, 0], states[0, 1], color='green', marker='o', label='Start')
+ax_traj.scatter(states[-1, 0], states[-1, 1], color='red', marker='x', label='End')
+
+# Plot the reference trajectory (static line)
+ax_traj.plot(ref_states[:, 0], ref_states[:, 1], label='Reference Trajectory', linestyle='dotted', color='blue')
+
+# Equal aspect ratio and limits
+ax_traj.axis('equal')
+ax_traj.grid()
+ax_traj.set_xlabel("X Position")
+ax_traj.set_ylabel("Y Position")
+ax_traj.set_title(f"control_type: {control_type} Trajectory")
+ax_traj.legend()
+# After plotting and setting up ax_traj
+time_text = ax_traj.text(0.05, 0.95, '', transform=ax_traj.transAxes,
+                         fontsize=12, verticalalignment='top',
+                         bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
+
+# Level set plot (if needed)
+
+plt_levelset(lambda x,y: get_h0(htable,x,y)[0],grid_region, ax=ax_traj)
+
+point, = ax_traj.plot([], [], 'bo', markersize=6)  # Current position marker
+ref_point, = ax_traj.plot([], [], 'go', markersize=6, label='Reference Position')  # Reference trajectory point
+
+
+# Right subplot: Inputs
+ax_u = axs[1]
+ax_u.plot(time_axis, nom_controls[:, 0], label='Nominal $u_1$')
+ax_u.plot(time_axis, nom_controls[:, 1], label='Nominal $u_2$')
+if use_filter:
+    ax_u.plot(time_axis, act_controls[:, 0], label='Filtered $u_1$', linestyle='dashed')
+    ax_u.plot(time_axis, act_controls[:, 1], label='Filtered $u_2$', linestyle='dashed')
+
+line_nom_u1, = ax_u.plot([], [],'bo')
+line_nom_u2, = ax_u.plot([], [],'go')
+if use_filter:
+    line_act_u1, = ax_u.plot([], [], 'ko')
+    line_act_u2, = ax_u.plot([], [], 'yo')
+
+ax_u.set_xlim(time_axis[0], time_axis[-1])
+all_controls = [nom_controls]
+if use_filter:
+    all_controls.append(act_controls)
+min_u = np.min([arr[:, i] for arr in all_controls for i in range(2)])
+max_u = np.max([arr[:, i] for arr in all_controls for i in range(2)])
+ax_u.set_ylim(min_u - 0.1, max_u + 0.1)
+
+ax_u.set_xlabel("Time (s)")
+ax_u.set_ylabel("Control Inputs")
+ax_u.set_title(f"Control Inputs vs Filtered Inputs, control_type: {control_type}")
+ax_u.grid()
+ax_u.legend()
+
+# Prepare data
+xdata, ydata_u1, ydata_u2 = [], [], []
+if use_filter:
+    ydata_act_u1, ydata_act_u2 = [], []
+
+def update(frame):
+    # Trajectory
+    point.set_data([states[frame, 0]], [states[frame, 1]])
+     # Update reference trajectory point
+    ref_point.set_data([ref_states[frame, 0]], [ref_states[frame, 1]])
+
+    # Inputs
+    line_nom_u1.set_data([time_axis[frame]], [nom_controls[frame, 0]])
+    line_nom_u2.set_data([time_axis[frame]], [nom_controls[frame, 1]])
+
+    if use_filter:        
+        line_act_u1.set_data([time_axis[frame]], [act_controls[frame, 0]])
+        line_act_u2.set_data([time_axis[frame]], [act_controls[frame, 1]])
+    
+    current_time = time_axis[frame]
+    time_text.set_text(f'Time: {current_time:.2f}s')
+
+    return point,ref_point, line_nom_u1, line_nom_u2, line_act_u1, line_act_u2,time_text if use_filter else (point, ref_point,line_nom_u1, line_nom_u2,time_text)
+
+ani = FuncAnimation(fig, update, frames=len(states)-1, interval=50, blit=True)
+
+plt.tight_layout()
+plt.show()
+
+ani.save(f'{control_type}_trajectory_animation.mp4', fps=20)

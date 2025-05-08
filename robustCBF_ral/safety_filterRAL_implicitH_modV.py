@@ -128,7 +128,7 @@ class SSF:
         self.psi_init = None
 
         scale = 0.1
-        self.Kv = 10 * scale
+        self.Kv = 20 * scale
         self.Kom = 15 * scale
 
         # a forward speed to use for x_des(t)
@@ -228,6 +228,28 @@ class SSF:
         # to check if whether the problem is DCP and/or DPP
         print(self.prob.is_dcp(dpp=True))  # is the problem DPP, constraints should be affine in parameters
         print(self.prob.is_dcp())  # is the problem Disciplined Convex Programming (DCP)
+
+    def xy_ref(self, state, t,y_mag=1.5, c= None,y_shift = 0.0):
+        if self.x_init is None:
+                self.x_init = np.zeros((3, 1)) 
+
+        if c is not None:
+            self.c = c
+
+        x   = state[0, 0]
+        y   = state[1, 0]
+        # psi = state[2, 0]
+        
+        # psi = wrap_to_pi(psi)
+
+        # constant reference input to test the controller
+        # x_des = 3.0
+        # y_des = 0.0
+        
+        x_des = self.v_ref * t  # 6 meters in 152s → v_ref = 0.5, x starts with 0
+        # x_des = self.x_init + self.v_ref  * t  # 6 meters in 152s → v_ref = 0.5
+        y_des = y_mag * np.sin(self.c * x_des + y_shift)
+        return x_des, y_des
 
 
     def k_des(self, state, t,y_mag=1.5, c= None,y_shift = 0.0):
@@ -341,16 +363,34 @@ class SSF:
         
         h0, dhdx, dhdy = get_h0(self.hvalues, self.pose_xi.value, self.pose_yi.value)
 
-        self.conspar.value = ((dhdx) * (self.cos_psi.value ) + (dhdy) * (self.sin_psi.value) 
-                              - self.delta_obs * np.sin(u_ang) * (ey * self.cos_psi.value - ex * self.sin_psi.value) / rho2)
+        self.conspar.value = ((dhdx) * (self.cos_psi.value ) + (dhdy) * (self.sin_psi.value) )
+                            #   - self.delta_obs * np.sin(u_ang) * (ey * self.cos_psi.value - ex * self.sin_psi.value) / rho2)
 
         # self.conspar.value = - 2 * (self.pose_yi.value) * (self.sin_psi.value )
 
-        self.conspar_ang.value =  (self.delta_obs) * (np.sin(wrap_to_pi(theta_des - psi)))  
+        # theta_des: Negative gradient from h0
+        psi_des = -np.arctan2(dhdx, dhdy)
+        # theta_des: from a safe velocity controller using single integrator dynamics
+        # explicit form from (11) - (17) ofCharacterizing Smooth Safety Filters via the Implicit Function Theorem
+        def lambda_S(a,b):
+            return (-a + np.sqrt(a**2 + b))/(2*b)
+        x_des,y_des = self.xy_ref(np.array([[self.pose_xi.value, self.pose_yi.value, self.pose_psi.value]]).T, t)
+        vx_des, vy_des = self.Kv *(x_des-self.pose_xi.value), self.Kv *(y_des - self.pose_yi.value)
+        lgh = np.array([dhdx, dhdy])
+        lgf, lghkd, alpha_h0 = 0.0, dhdx*vx_des + dhdy*vy_des, h0
+        a_x = lgf + lghkd + alpha_h0
+        b_x = dhdx**2 + dhdy**2
+        v_safe = np.array([vx_des,vy_des]) + lambda_S(a_x,b_x)*lgh
+        psi_des = np.arctan2(v_safe[1],v_safe[0])
 
-        self.conspar_timevarying.value = - (self.delta_obs) * theta_dot_des * (np.sin(wrap_to_pi(theta_des - psi)))
+        V_theta = self.delta_obs * (1 - np.cos(wrap_to_pi(psi - psi_des )))
+        self.conspar_ang.value =  -(self.delta_obs) * (np.sin(wrap_to_pi(psi - psi_des)))  
 
-        self.cbf_alpha.value = self.alpha * (h0 - self.delta_obs * (1 - np.cos(wrap_to_pi(theta_des - psi))))  # 
+        # self.conspar_timevarying.value = - (self.delta_obs) * theta_dot_des * (np.sin(wrap_to_pi(theta_des - psi)))
+        self.conspar_timevarying.value = 0.0
+
+        # self.cbf_alpha.value = self.alpha * (h0 - self.delta_obs * (1 - np.cos(wrap_to_pi(theta_des - psi))))  #
+        self.cbf_alpha.value = self.alpha * (h0 - V_theta)
 
         # self.cbf_alpha.value = self.alpha * ((self.d)**2 - (self.pose_yi.value)**2 )  # update this
 
@@ -402,3 +442,33 @@ class SSF:
 
         return u_safe
 
+    def single_integrator_tracking_controller(self, state, t,y_mag=1.5, c= None,y_shift = 0.0):
+        x_des, y_des = self.xy_ref(state, t,y_mag=1.5, c= None,y_shift = 0.0)
+        vx_des, vy_des = self.Kv *(x_des-state[0,0]), self.Kv *(y_des - state[1,0])
+        return vx_des, vy_des
+
+
+    def single_integrator_safety_filter(self, state, t,y_mag=1.5, c= None,y_shift = 0.0):
+        alpha = 1
+        x,y = state[0,0],state[1,0]
+        # compute vx_des, vy_des
+        vx_des, vy_des =self.single_integrator_tracking_controller(state, t,y_mag, c,y_shift)
+        h0, dhdx, dhdy = get_h0(self.hvalues, x, y)
+
+        # formulate CBF-QP using h0 and dhdx, dhdy
+        v_des = np.array([vx_des, vy_des])
+        grad_h = np.array([dhdx, dhdy])
+        alpha_h = alpha*h0
+        # explicit QP solution
+        a_x = np.inner(v_des,grad_h) + alpha_h
+        b_x = np.linalg.norm(grad_h)**2
+        # v_safe =  v_des + max(-(a_x)/(b_x),0)*grad_h
+
+        # explicit half-Sontag formula
+        def lambda_S(a,b):
+            return (-a + np.sqrt(a**2 + 0.1*b))/(2*b)
+        v_safe = v_des + lambda_S(a_x,b_x)*grad_h
+        
+        self.data_dict = {"h1": h0}
+
+        return v_safe[0], v_safe[1]
