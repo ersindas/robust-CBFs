@@ -466,7 +466,7 @@ class SSF:
 
         # explicit half-Sontag formula
         def lambda_S(a,b):
-            return (-a + np.sqrt(a**2 + 0.1*b))/(2*b)
+            return (-a + np.sqrt(a**2 + 0.1 * b**2))/(2*b) # i think it is b**2 not b 
         v_safe = v_des + lambda_S(a_x,b_x)*grad_h
         
         self.data_dict = {"h1": h0}
