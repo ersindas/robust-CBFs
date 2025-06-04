@@ -42,11 +42,11 @@ def get_h0(h, x, y):
     jmax = 1000.0 # Grid J Dimension (Positive X-Direction)
     ds = 0.01 # Grid Resolution
 
-    # Define X-Y Coordinate for Bottom Left Corner of Grid
+       # Define X-Y Coordinate for Bottom Left Corner of Grid
     x0, y0 = -1.00, -1.10 
 
     # Fractional Index Corresponding to Current Position
-    ir = (imax-1.0) - (y - y0) / ds
+    ir = (y - y0) / ds
     jr = (x - x0) / ds
 
     # Saturated Because of Finite Grid Size
@@ -64,31 +64,31 @@ def get_h0(h, x, y):
     elif (jc!=jr):
         h0 -= np.abs(jr-jc) * ds
 
-    # Compute Gradients
-    i_eps = 1.0
-    j_eps = 1.0
-    ip = np.fmin(np.fmax(0.0, ic - i_eps), imax-1.0)
-    im = np.fmin(np.fmax(0.0, ic + i_eps), imax-1.0)
+    # Compute Gradient
+    i_eps = 10.0
+    j_eps = 10.0
+    ip = np.fmin(np.fmax(0.0, ic + i_eps), imax-1.0)
+    im = np.fmin(np.fmax(0.0, ic - i_eps), imax-1.0)
     jp = np.fmin(np.fmax(0.0, jc + j_eps), jmax-1.0)
     jm = np.fmin(np.fmax(0.0, jc - j_eps), jmax-1.0)
-    dhdx = (bilinear_interpolation(h, ic, jp) - bilinear_interpolation(h, ic, jm)) / ((jp-jm)*ds)
-    dhdy = (bilinear_interpolation(h, ip, jc) - bilinear_interpolation(h, im, jc)) / ((im-ip)*ds)
+    hxp = bilinear_interpolation(h, ic, jp)
+    hxm = bilinear_interpolation(h, ic, jm)
+    hyp = bilinear_interpolation(h, ip, jc)
+    hym = bilinear_interpolation(h, im, jc)
+    dhdx = (hxp - hxm) / ((jp-jm)*ds)
+    dhdy = (hyp - hym) / ((ip-im)*ds)
 
-    return h0, dhdx, dhdy
+    # Compute Hessian
+    hpp = bilinear_interpolation(h, ip, jp)
+    hpm = bilinear_interpolation(h, im, jp)
+    hmp = bilinear_interpolation(h, ip, jm)
+    hmm = bilinear_interpolation(h, im, jm)
 
+    d2hdx2 = ((hxp - h0) / ((jp-jc)*ds) - (h0 - hxm) / ((jc-jm)*ds)) / ((jp-jm)/2.0*ds)
+    d2hdy2 = ((hyp - h0) / ((ip-ic)*ds) - (h0 - hym) / ((ic-im)*ds)) / ((ip-im)/2.0*ds)
+    d2hdxdy = (hpp + hmm - hpm - hmp) / ((jp-jm)*(ip-im)*ds*ds)
 
-def obstacle_cbf(p_x, p_y, psi, o_x, o_y, R, delta):
-    """
-    returns:  h,   A (coeff of v),   B (coeff of omega)
-     """
-    dx, dy   = p_x - o_x, p_y - o_y
-    D        = np.hypot(dx, dy)
-    n_x, n_y = dx / D, dy / D
-    c        = n_x * np.cos(psi) + n_y * np.sin(psi)          
-    h        = D - R + delta * c
-    A        = c + delta * (1 - c**2) / D                         
-    B        = delta * (n_x * -np.sin(psi) + n_y * np.cos(psi))   
-    return h, A, B
+    return h0, dhdx, dhdy, d2hdx2, d2hdy2, d2hdxdy
 
 
 class SSF:
@@ -128,7 +128,7 @@ class SSF:
         self.psi_init = None
 
         scale = 0.1
-        self.Kv = 20 * scale
+        self.Kv = 10 * scale
         self.Kom = 15 * scale
 
         # a forward speed to use for x_des(t)
@@ -171,7 +171,8 @@ class SSF:
         # ds = 0.01 # Grid Resolution
 
         script_dir = os.path.dirname(os.path.realpath(__file__))
-        csv_path = os.path.join(script_dir, 'poisson_safety_grid_2_5.csv')
+        # csv_path = os.path.join(script_dir, 'poisson_safety_grid_2_5.csv')
+        csv_path = os.path.join(script_dir, 'poisson_safety_grid.csv')
         with open(csv_path, 'r') as file:
             reader = csv.reader(file)
             # data = list(reader)
@@ -250,7 +251,7 @@ class SSF:
         # x_des = self.x_init + self.v_ref  * t  # 6 meters in 152s → v_ref = 0.5
         y_des = y_mag * np.sin(self.c * x_des + y_shift)
         return x_des, y_des
-
+    
 
     def k_des(self, state, t,y_mag=1.5, c= None,y_shift = 0.0):
         """
@@ -310,7 +311,23 @@ class SSF:
         denom = ex**2 + ey**2
         theta_d_dot = 0.0 if denom < 1e-5 else (ex*ey_dot - ey*ex_dot) / denom
 
-        return linear, angular, theta_d, theta_d_dot, ex, ey
+        vp       = np.array([self.Kv*ex, self.Kv*ey])          
+        dvp_dx   = np.array([-self.Kv, 0.0])
+        dvp_dy   = np.array([0.0, -self.Kv])
+        dvp_dt   = np.array([self.Kv*x_des_dot, self.Kv*y_des_dot])
+
+        return {
+            "linear_cmd":  linear,
+            "angular_cmd": angular,
+            "theta_des":   theta_d,
+            "theta_d_dot": theta_d_dot,
+            "ex": ex, "ey": ey,
+            "x_des_dot": x_des_dot, "y_des_dot": y_des_dot,
+            "vp": vp,
+            "dvp_dx": dvp_dx, "dvp_dy": dvp_dy, "dvp_dt": dvp_dt
+        }
+
+        # return linear, angular, theta_d, theta_d_dot, ex, ey
 
     def control_ssf(self, state, u_nominal):
         #
@@ -355,42 +372,101 @@ class SSF:
         # time = number_of_calls * dt
         t = SSF.counter * self.dt
 
-        self.nominal_linear.value, self.nominal_angular.value, theta_des, theta_dot_des, ex, ey = self.k_des(
-            np.array([[self.pose_xi.value, self.pose_yi.value, self.pose_psi.value]]).T, t)
+        # self.nominal_linear.value, self.nominal_angular.value, theta_des, theta_dot_des, ex, ey = self.k_des(
+        #     np.array([[self.pose_xi.value, self.pose_yi.value, self.pose_psi.value]]).T, t)
+        
+        k = self.k_des(np.array([[self.pose_xi.value,
+                          self.pose_yi.value,
+                          self.pose_psi.value]]).T, t)
+
+        self.nominal_linear.value  = k["linear_cmd"]
+        self.nominal_angular.value = k["angular_cmd"]
+        theta_des     = k["theta_des"]
+        theta_dot_des = k["theta_d_dot"]
+        ex, ey        = k["ex"], k["ey"]
+
+        # tracker velocity and Jacobians
+        vp      = k["vp"]
+        dvp_dx  = k["dvp_dx"]
+        dvp_dy  = k["dvp_dy"]
+        dvp_dt  = k["dvp_dt"]
         
         rho2  = ex**2 + ey**2 + 1e-8               
         u_ang = wrap_to_pi(theta_des - self.pose_psi.value)         
         
-        h0, dhdx, dhdy = get_h0(self.hvalues, self.pose_xi.value, self.pose_yi.value)
+        # h0, dhdx, dhdy = get_h0(self.hvalues, self.pose_xi.value, self.pose_yi.value)
+        h0, dhdx, dhdy, d2hdx2, d2hdy2, d2hdxdy = get_h0(self.hvalues, self.pose_xi.value, self.pose_yi.value)
 
-        self.conspar.value = ((dhdx) * (self.cos_psi.value ) + (dhdy) * (self.sin_psi.value) )
-                            #   - self.delta_obs * np.sin(u_ang) * (ey * self.cos_psi.value - ex * self.sin_psi.value) / rho2)
+        # ======================================================================
+        a0      = self.delta_obs
+        alpha_f = self.alpha
+        alpha_q = 0.1
 
-        # self.conspar.value = - 2 * (self.pose_yi.value) * (self.sin_psi.value )
+        grad_h0 = np.array([dhdx, dhdy])
+        Hh0     = np.array([[d2hdx2, d2hdxdy],
+                            [d2hdxdy, d2hdy2]])
 
-        # theta_des: Negative gradient from h0
-        psi_des = -np.arctan2(dhdx, dhdy)
-        # theta_des: from a safe velocity controller using single integrator dynamics
-        # explicit form from (11) - (17) ofCharacterizing Smooth Safety Filters via the Implicit Function Theorem
-        def lambda_S(a,b):
-            return (-a + np.sqrt(a**2 + b))/(2*b)
-        x_des,y_des = self.xy_ref(np.array([[self.pose_xi.value, self.pose_yi.value, self.pose_psi.value]]).T, t)
-        vx_des, vy_des = self.Kv *(x_des-self.pose_xi.value), self.Kv *(y_des - self.pose_yi.value)
-        lgh = np.array([dhdx, dhdy])
-        lgf, lghkd, alpha_h0 = 0.0, dhdx*vx_des + dhdy*vy_des, h0
-        a_x = lgf + lghkd + alpha_h0
-        b_x = dhdx**2 + dhdy**2
-        v_safe = np.array([vx_des,vy_des]) + lambda_S(a_x,b_x)*lgh
-        psi_des = np.arctan2(v_safe[1],v_safe[0])
+        # a(x,y,t), b(x,y) 
+        a_val = grad_h0 @ vp + alpha_f * h0
+        b_val = grad_h0 @ grad_h0 + 1e-12
 
-        V_theta = self.delta_obs * (1 - np.cos(wrap_to_pi(psi - psi_des )))
-        self.conspar_ang.value =  -(self.delta_obs) * (np.sin(wrap_to_pi(psi - psi_des)))  
+        da_dx = grad_h0 @ dvp_dx + Hh0[:,0] @ vp + alpha_f * dhdx
+        da_dy = grad_h0 @ dvp_dy + Hh0[:,1] @ vp + alpha_f * dhdy
+        da_dt = grad_h0 @ dvp_dt
+        db_dx = 2*(dhdx*d2hdx2 + dhdy*d2hdxdy)
+        db_dy = 2*(dhdx*d2hdxdy + dhdy*d2hdy2)
+
+        # \lambda(a, b)
+        S      = np.sqrt(a_val**2 + alpha_q*b_val**2)
+        lam    = (-a_val + S) / (2*b_val)
+        lam_a  = (-1 + a_val/S) / (2*b_val)
+        # lam_b  =  alpha_q*b_val/(2*S) - (a_val+S)/(2*b_val**2)
+        lam_b =  alpha_q/(2*S) + (a_val - S)/(2*b_val**2)
+        dlam_dx = lam_a*da_dx + lam_b*db_dx
+        dlam_dy = lam_a*da_dy + lam_b*db_dy
+        dlam_dt = lam_a*da_dt
+
+        # safe velocity 
+        vs      = vp + lam*grad_h0
+        dvs_dx  = dvp_dx + dlam_dx*grad_h0 + lam*Hh0[:,0]
+        dvs_dy  = dvp_dy + dlam_dy*grad_h0 + lam*Hh0[:,1]
+        dvs_dt  = dvp_dt + dlam_dt*grad_h0
+
+        # \theta_s 
+        Ns      = vs[0]**2 + vs[1]**2
+        def dtheta(dvs): return (vs[0]*dvs[1] - vs[1]*dvs[0]) / Ns
+        theta_s = np.arctan2(vs[1], vs[0])
+        ths_x, ths_y, ths_t = dtheta(dvs_dx), dtheta(dvs_dy), dtheta(dvs_dt)
+
+        # Lie derivatives 
+        delta_th = wrap_to_pi(self.pose_psi.value - theta_s)
+        sinDel   = np.sin(delta_th)
+        hx = dhdx + a0*sinDel*ths_x
+        hy = dhdy + a0*sinDel*ths_y
+        hpsi = -a0*sinDel
+        ht =  a0*sinDel*ths_t
+
+        Lgv     = hx*self.cos_psi.value + hy*self.sin_psi.value
+        Lgomega = hpsi
+        Lt      = ht
+
+        self.conspar.value             = Lgv
+        self.conspar_ang.value         = Lgomega
+        self.conspar_timevarying.value = -Lt
+        self.cbf_alpha.value           = self.alpha * (h0 - a0*(1 - np.cos(delta_th)))
+        # ======================================================================
+
+
+        # self.conspar.value = ((dhdx) * (self.cos_psi.value ) + (dhdy) * (self.sin_psi.value) 
+        #                       - self.delta_obs * np.sin(u_ang) * (ey * self.cos_psi.value - ex * self.sin_psi.value) / rho2)
+
+        # # self.conspar.value = - 2 * (self.pose_yi.value) * (self.sin_psi.value )
+
+        # self.conspar_ang.value =  (self.delta_obs) * (np.sin(wrap_to_pi(theta_des - psi)))  
 
         # self.conspar_timevarying.value = - (self.delta_obs) * theta_dot_des * (np.sin(wrap_to_pi(theta_des - psi)))
-        self.conspar_timevarying.value = 0.0
 
-        # self.cbf_alpha.value = self.alpha * (h0 - self.delta_obs * (1 - np.cos(wrap_to_pi(theta_des - psi))))  #
-        self.cbf_alpha.value = self.alpha * (h0 - V_theta)
+        # self.cbf_alpha.value = self.alpha * (h0 - self.delta_obs * (1 - np.cos(wrap_to_pi(theta_des - psi))))  # 
 
         # self.cbf_alpha.value = self.alpha * ((self.d)**2 - (self.pose_yi.value)**2 )  # update this
 
@@ -442,33 +518,3 @@ class SSF:
 
         return u_safe
 
-    def single_integrator_tracking_controller(self, state, t,y_mag=1.5, c= None,y_shift = 0.0):
-        x_des, y_des = self.xy_ref(state, t,y_mag=1.5, c= None,y_shift = 0.0)
-        vx_des, vy_des = self.Kv *(x_des-state[0,0]), self.Kv *(y_des - state[1,0])
-        return vx_des, vy_des
-
-
-    def single_integrator_safety_filter(self, state, t,y_mag=1.5, c= None,y_shift = 0.0):
-        alpha = 1
-        x,y = state[0,0],state[1,0]
-        # compute vx_des, vy_des
-        vx_des, vy_des =self.single_integrator_tracking_controller(state, t,y_mag, c,y_shift)
-        h0, dhdx, dhdy = get_h0(self.hvalues, x, y)
-
-        # formulate CBF-QP using h0 and dhdx, dhdy
-        v_des = np.array([vx_des, vy_des])
-        grad_h = np.array([dhdx, dhdy])
-        alpha_h = alpha*h0
-        # explicit QP solution
-        a_x = np.inner(v_des,grad_h) + alpha_h
-        b_x = np.linalg.norm(grad_h)**2
-        # v_safe =  v_des + max(-(a_x)/(b_x),0)*grad_h
-
-        # explicit half-Sontag formula
-        def lambda_S(a,b):
-            return (-a + np.sqrt(a**2 + 0.1 * b**2))/(2*b) # i think it is b**2 not b 
-        v_safe = v_des + lambda_S(a_x,b_x)*grad_h
-        
-        self.data_dict = {"h1": h0}
-
-        return v_safe[0], v_safe[1]

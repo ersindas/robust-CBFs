@@ -1,52 +1,62 @@
 import sympy as sp
 
-t = sp.symbols('t', real=True)
-x = sp.Function('x')(t)
-y = sp.Function('y')(t)
-theta = sp.Function('theta')(t)
+# Symbols and functions
+x, y, theta, t = sp.symbols('x y theta t')
+a0, alpha, alpha_q, K_v = sp.symbols('a0 alpha alpha_q K_v', positive=True)
+h0 = sp.Function('h0')(x, y)
+
+# First- and second-order derivatives
+h0_x = sp.diff(h0, x)
+h0_y = sp.diff(h0, y)
+h0_xx = sp.diff(h0_x, x)
+h0_xy = sp.diff(h0_x, y)
+h0_yy = sp.diff(h0_y, y)
+
+grad_h0 = sp.Matrix([h0_x, h0_y])
+hessian_h0 = sp.Matrix([[h0_xx, h0_xy], [h0_xy, h0_yy]])
+
+# Reference signals
 x_d = sp.Function('x_d')(t)
 y_d = sp.Function('y_d')(t)
-v = sp.Function('v')(t)
-omega = sp.Function('omega')(t)
-a0, Kv, alpha, alpha_q = sp.symbols('a0 Kv alpha alpha_q', positive=True)
+x_d_dot = sp.diff(x_d, t)
+y_d_dot = sp.diff(y_d, t)
 
-h0 = sp.Function('h0')(x, y)
-h0_x = sp.Derivative(h0, x)
-h0_y = sp.Derivative(h0, y)
+# Proportional controller
+r_e = sp.Matrix([x_d - x, y_d - y])
+v_p = K_v * r_e
 
-v_p_x = Kv * (x_d - x)
-v_p_y = Kv * (y_d - y)
+# Filter terms
+a = grad_h0.dot(v_p) + alpha * h0
+b = grad_h0.dot(grad_h0)
+# q = alpha_q * b
+lambda_sym = (-a + sp.sqrt(a**2 + alpha_q * b**2)) / (2 * b)
 
-a_expr = h0_x * v_p_x + h0_y * v_p_y + alpha * h0
-b_expr = h0_x**2 + h0_y**2
-lambda_expr = (-a_expr + sp.sqrt(a_expr**2 + alpha_q * b_expr**2)) / (2 * b_expr)
+# Filtered velocity and heading
+v_s = v_p + lambda_sym * grad_h0
+v_sx, v_sy = v_s[0], v_s[1]
+theta_s = sp.atan2(v_sy, v_sx)
+V = 1 - sp.cos(theta - theta_s)
+h = h0 - a0 * V
 
-v_s_x = v_p_x + lambda_expr * h0_x
-v_s_y = v_p_y + lambda_expr * h0_y
-theta_s = sp.atan2(v_s_y, v_s_x)
+# Compute partial derivatives
+dh_dx = sp.diff(h, x).doit()
+dh_dy = sp.diff(h, y).doit()
+dh_dtheta = sp.diff(h, theta)
+dh_dt = sp.diff(h, t).doit()
 
-h_expr = h0 - a0 * (1 - sp.cos(theta - theta_s))
-dh_dt = sp.diff(h_expr, t)
-dh_dt_unicycle = dh_dt.subs({
-    sp.diff(x, t): v * sp.cos(theta),
-    sp.diff(y, t): v * sp.sin(theta),
-    sp.diff(theta, t): omega
-})
+# Simplify using common subexpression elimination (CSE)
+repl, [dh_dx_s, dh_dy_s, dh_dtheta_s, dh_dt_s] = sp.cse(
+    [dh_dx, dh_dy, dh_dtheta, dh_dt],
+    symbols=sp.numbered_symbols('z')
+)
 
-hx, hy = sp.symbols('h_x h_y')
-hxx, hxy, hyy = sp.symbols('h_xx h_xy h_yy')
+# Display replacements and simplified expressions
+print("=== Common Subexpressions ===")
+for i, (var, expr) in enumerate(repl):
+    print(f"{var} = {expr}")
 
-repl_map = {
-    sp.Derivative(h0, x): hx,
-    sp.Derivative(h0, y): hy,
-    sp.Derivative(h0, x, x): hxx,
-    sp.Derivative(h0, x, y): hxy,
-    sp.Derivative(h0, y, x): hxy,
-    sp.Derivative(h0, y, y): hyy,
-}
-
-expr_short = dh_dt_unicycle.xreplace(repl_map)
-
-expr_short = sp.simplify(expr_short)
-
-expr_short
+print("\n=== Simplified Partial Derivatives ===")
+print("dh/dx =", dh_dx_s)
+print("dh/dy =", dh_dy_s)
+print("dh/dtheta =", dh_dtheta_s)
+print("dh/dt =", dh_dt_s)

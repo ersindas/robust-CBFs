@@ -3,8 +3,9 @@ from typing import List
 import itertools
 import logging
 # from safety_filterRAL_explicitH import SSF
-from safety_filterRAL_implicitH_modV import SSF
-from safety_filterRAL_implicitH import get_h0
+from safety_filterRAL_implicitH_DRD import SSF, get_h0
+# from safety_filterRAL_implicitH_modV import SSF
+# from safety_filterRAL_implicitH import get_h0
 import time as timer
 from types import SimpleNamespace
 import matplotlib.pyplot as plt
@@ -16,7 +17,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-file_path = os.path.join(script_dir, 'poisson_safety_grid_2_5.csv')
+# file_path = os.path.join(script_dir, 'poisson_safety_grid_2_5.csv')
+file_path = os.path.join(script_dir, 'poisson_safety_grid.csv')
 
 
 class UnicycleModel:
@@ -226,7 +228,9 @@ for i in range(timesteps):
     # generate nominal input in different cases
     # x_ref = reference_path(time,reference_param)
     state_2d = state.reshape(-1,1)
-    u_nom = ssf_controller.k_des(state_2d,time,y_mag = y_mag, c = c)
+    # u_nom = ssf_controller.k_des(state_2d,time,y_mag = y_mag, c = c)
+    v_cmd, w_cmd, *_ = ssf_controller.k_des(state_2d, time, y_mag=y_mag, c=c)
+    u_nom = [v_cmd, w_cmd]
 
     # generate actual input in different cases
     if use_filter:
@@ -254,11 +258,7 @@ for i in range(timesteps):
 
     # logging
     ref_state_x, ref_state_y = ssf_controller.xy_ref(state_2d,time,y_mag=y_mag, c= c)
-
-    # to fix the error i need to comment this:
     # ref_state = [ref_state_x,ref_state_y]
-
-
     h_val = ssf_controller.data_dict['h1'] # for plotting
     states.append(state_next)
     ref_states.append(ref_state)
