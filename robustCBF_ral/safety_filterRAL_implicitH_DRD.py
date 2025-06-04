@@ -433,7 +433,8 @@ class SSF:
         dvs_dt  = dvp_dt + dlam_dt*grad_h0
 
         # \theta_s 
-        Ns      = vs[0]**2 + vs[1]**2
+        # Ns      = vs[0]**2 + vs[1]**2
+        Ns = max(vs[0]**2 + vs[1]**2, 1e-12)
         def dtheta(dvs): return (vs[0]*dvs[1] - vs[1]*dvs[0]) / Ns
         theta_s = np.arctan2(vs[1], vs[0])
         ths_x, ths_y, ths_t = dtheta(dvs_dx), dtheta(dvs_dy), dtheta(dvs_dt)
@@ -452,7 +453,7 @@ class SSF:
 
         self.conspar.value             = Lgv
         self.conspar_ang.value         = Lgomega
-        self.conspar_timevarying.value = -Lt
+        self.conspar_timevarying.value = Lt
         self.cbf_alpha.value           = self.alpha * (h0 - a0*(1 - np.cos(delta_th)))
         # ======================================================================
 

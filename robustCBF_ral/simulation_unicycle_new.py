@@ -171,9 +171,9 @@ class SingleIntegratorModel:
     
 ############ tunable parameters ####
 y_mag = 1.5
-c = 3.0 * np.pi / 6 
+c = 3 * np.pi / 6 
 v_ref = 0.2
-delta_obs = 0.1
+delta_obs = 1
 
 obs_x  = np.array([2.5,  6.5])   
 obs_y  = np.array([0.0,  0.0])  
@@ -229,8 +229,14 @@ for i in range(timesteps):
     # x_ref = reference_path(time,reference_param)
     state_2d = state.reshape(-1,1)
     # u_nom = ssf_controller.k_des(state_2d,time,y_mag = y_mag, c = c)
-    v_cmd, w_cmd, *_ = ssf_controller.k_des(state_2d, time, y_mag=y_mag, c=c)
-    u_nom = [v_cmd, w_cmd]
+    # v_cmd, w_cmd, *_ = ssf_controller.k_des(state_2d, time, y_mag=y_mag, c=c)
+
+    k      = ssf_controller.k_des(state_2d, time, y_mag=y_mag, c=c)
+    v_cmd  = k["linear_cmd"]
+    w_cmd  = k["angular_cmd"]
+    u_nom  = [v_cmd, w_cmd]
+
+    # u_nom = [v_cmd, w_cmd]
 
     # generate actual input in different cases
     if use_filter:
