@@ -6,6 +6,7 @@ import csv
 import os
 import numpy as np
 import time
+# import tf
 from std_msgs.msg import Float64
 
 def wrap_to_pi(angle):
@@ -193,6 +194,7 @@ class SSF:
         self.x_init = None
         self.y_init = None
         self.psi_init = None
+        self.frame_tranform = None
 
         # self.xgoal = np.array([[0, -1.0]]).T
         # self.xO = np.array([[1.5, 0], [3, -1.5]]).T
@@ -457,11 +459,13 @@ class SSF:
             self.x_init = x_temp
             self.y_init = y_temp
             self.psi_init = psi_temp
+            self.frame_transform = self.inverse_transform(x_temp,y_temp,psi_temp)
         else:
-            self.pose_xi.value = x_temp - self.x_init  # x-axis in the world frame
-            self.pose_yi.value = y_temp - self.y_init  # y-axis in the world frame
+            # self.pose_xi.value = x_temp - self.x_init  # x-axis in the world frame
+            # self.pose_yi.value = y_temp - self.y_init  # y-axis in the world frame
             # psi = psi_temp - self.psi_init
-            psi = wrap_to_pi(psi_temp - self.psi_init)
+            # psi = wrap_to_pi(psi_temp - self.psi_init)
+            self.pose_xi.value, self.pose_yi.value, psi = self.apply_transform(self.frame_transform,x_temp,y_temp,psi_temp)
 
         self.sinydx.value = np.sin(self.c * self.pose_xi.value + self.b)
         self.cosydx.value = np.cos(self.c * self.pose_xi.value + self.b)
@@ -887,3 +891,68 @@ class SSF:
         }
 
         return u_safe
+    
+    # obtain frame transformation
+    def inverse_transform(self, x,y,yaw):
+        # 3D transformation using pose msg. Comment out for now
+        # def inverse_transform(self, pose):
+            # trans = [pose.position.x, pose.position.y, pose.position.z]
+            # rot = [pose.orientation.x, pose.orientation.y,
+            #        pose.orientation.z, pose.orientation.w]
+            # T = tf.transformations.concatenate_matrices(
+            #     tf.transformations.translation_matrix(trans),
+            #     tf.transformations.quaternion_matrix(rot)
+            # )
+            # T_inv = tf.transformations.inverse_matrix(T)
+
+        # 2D transformation, yaw in radius
+        c = np.cos(yaw)
+        s = np.sin(yaw)
+        se2_mat = np.array([
+            [c, -s, x],
+            [s,  c, y],
+            [0,  0, 1]
+        ])
+        T_inv = np.linalg.inv(se2_mat)
+        return T_inv
+    
+    # apply frame transformation
+    def apply_transform(self,T,x,y,yaw):
+        # 3D transformation using pose msg. Comment out for now
+        # def apply_transform(self, pose, T):
+        #     # Original pose as matrix
+        #     trans = [pose.position.x, pose.position.y, pose.position.z]
+        #     rot = [pose.orientation.x, pose.orientation.y,
+        #         pose.orientation.z, pose.orientation.w]
+        #     P = tf.transformations.concatenate_matrices(
+        #         tf.transformations.translation_matrix(trans),
+        #         tf.transformations.quaternion_matrix(rot)
+        #     )
+        #     P_new = tf.transformations.concatenate_matrices(T, P)
+        #     # Extract transformed translation and rotation
+        #     new_trans = tf.transformations.translation_from_matrix(P_new)
+        #     new_rot = tf.transformations.quaternion_from_matrix(P_new)
+
+        #     from geometry_msgs.msg import Pose
+        #     new_pose = Pose()
+        #     new_pose.position.x = new_trans[0]
+        #     new_pose.position.y = new_trans[1]
+        #     new_pose.position.z = new_trans[2]
+        #     new_pose.orientation.x = new_rot[0]
+        #     new_pose.orientation.y = new_rot[1]
+        #     new_pose.orientation.z = new_rot[2]
+        #     new_pose.orientation.w = new_rot[3]
+
+        c = np.cos(yaw)
+        s = np.sin(yaw)
+        # before tranformation 
+        se2_mat_before= np.array([
+            [c, -s, x],
+            [s,  c, y],
+            [0,  0, 1]
+        ])
+        # after transformation
+        se2_mat_relative = np.dot(T,se2_mat_before)
+        x_relative, y_relative = se2_mat_relative[0,2],se2_mat_relative[1,2]
+        yaw_relative = np.atan2(se2_mat_relative[1, 0], se2_mat_relative[0, 0])
+        return x_relative, y_relative, yaw_relative
