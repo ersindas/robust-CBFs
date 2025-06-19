@@ -459,7 +459,10 @@ class SSF:
             self.x_init = x_temp
             self.y_init = y_temp
             self.psi_init = psi_temp
-            self.frame_transform = self.inverse_transform(x_temp,y_temp,psi_temp)
+
+            # the configuration you want the robot to start at
+            x_d,y_d, psi_d = 0.0, -0.5, 0 
+            self.frame_transform = self.inverse_transform(x_temp,y_temp,psi_temp,xd = x_d, yd = y_d, yawd= psi_d)
         else:
             # self.pose_xi.value = x_temp - self.x_init  # x-axis in the world frame
             # self.pose_yi.value = y_temp - self.y_init  # y-axis in the world frame
@@ -893,7 +896,7 @@ class SSF:
         return u_safe
     
     # obtain frame transformation
-    def inverse_transform(self, x,y,yaw):
+    def inverse_transform(self, x,y,yaw, xd=0,yd=0,yawd=0):
         # 3D transformation using pose msg. Comment out for now
         # def inverse_transform(self, pose):
             # trans = [pose.position.x, pose.position.y, pose.position.z]
@@ -913,8 +916,17 @@ class SSF:
             [s,  c, y],
             [0,  0, 1]
         ])
+
+        cd = np.cos(yawd)
+        sd = np.sin(yawd)
+        se2_matd = np.array([
+            [cd, -sd, xd],
+            [sd, cd, yd],
+            [ 0,  0,  1]
+        ]) 
         T_inv = np.linalg.inv(se2_mat)
-        return T_inv
+        T_vio2control = np.matmul(se2_matd,T_inv)
+        return T_vio2control
     
     # apply frame transformation
     def apply_transform(self,T,x,y,yaw):
