@@ -183,8 +183,8 @@ class SSF:
         self.alpha = alpha  # cbf class-k function parameter
 
         # initial robustness parameters
-        self.k_1 = 0 
-        self.k_2 = 0 
+        self.k_1 = cp.Parameter(value=0.0)
+        self.k_2 = cp.Parameter(value=0.0)
 
         # # self.k_tune = -0.5 # if is tunable
         # self.k_tune = 0.0 # if is not tunable
@@ -626,8 +626,11 @@ class SSF:
         cost[~np.isfinite(cost)] = 1e6
         best     = np.nanargmin(cost)
 
-        self.k_1 = 1 * float(gammas1_flat[best])
-        self.k_2 = 1 * float(gammas2_flat[best])
+        self.k_1.value = 1 * float(gammas1_flat[best])
+        self.k_2.value = 1 * float(gammas2_flat[best])
+
+        print(f"k_1.value: {self.k_1.value}, k_2.value: {self.k_2.value}")
+
 
         # for gamma1 in gamma_vals:
         #     for gamma2 in gamma_vals:
@@ -662,7 +665,7 @@ class SSF:
 
         # self.k_1 = best_gamma1
         # self.k_2 = best_gamma2
-        print(f"Optimized gamma1: {self.k_1}, gamma2: {self.k_2}")
+        print(f"Optimized gamma1: {self.k_1.value}, gamma2: {self.k_2.value}")
 
 
         def rob_term(k1, k2, Lg_vec):
@@ -671,7 +674,7 @@ class SSF:
             return k1 * nrm  + (k2 **2 ) * (nrm**2)  # we use gamma_2^2 as in the paper
         
         # tunable robust CBF term
-        self.tunable.value = rob_term(self.k_1, self.k_2, np.array([self.conspar.value, self.conspar_ang.value]))
+        self.tunable.value = rob_term(self.k_1.value, self.k_2.value, np.array([self.conspar.value, self.conspar_ang.value]))
 
         print(  # f"alpha {self.alpha:6.2f} -> {alpha_safe:6.2}, "
             # f"Roll: {phi * 180 / 3.1415926:6.2f}, "
@@ -716,8 +719,8 @@ class SSF:
         SSF.counter += 1
 
         self.data_dict = {
-            "gamma_1": self.k_1,
-            "gamma_2": self.k_2,
+            "gamma_1": self.k_1.value,
+            "gamma_2": self.k_2.value,
             "delta": delta,
             "h1": h1,
             "u_baseline1": self.nominal_linear.value,
