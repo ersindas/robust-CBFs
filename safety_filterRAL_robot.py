@@ -151,7 +151,7 @@ class SSF:
 
         scale = 0.1
         self.Kv = 10 * scale
-        self.Kom = 15 * scale
+        self.Kom = 25 * scale
 
         # a forward speed to use for x_des(t)
         self.v_ref = v_ref
