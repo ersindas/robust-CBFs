@@ -629,6 +629,10 @@ class SSF:
         self.k_1.value = 1 * float(gammas1_flat[best])
         self.k_2.value = 1 * float(gammas2_flat[best])
 
+        # to use constant, or zero parameters
+        self.k_1.value = 0 * float(gammas1_flat[best]) + 0 * 0.3 
+        self.k_2.value = 0 * float(gammas2_flat[best]) + 0 * 0.0
+
         print(f"k_1.value: {self.k_1.value}, k_2.value: {self.k_2.value}")
 
 
