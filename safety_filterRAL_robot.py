@@ -183,8 +183,8 @@ class SSF:
         self.alpha = alpha  # cbf class-k function parameter
 
         # initial robustness parameters
-        self.k_1 = cp.Parameter(value=0.0)
-        self.k_2 = cp.Parameter(value=0.0)
+        self.k_1 = cp.Parameter(value=0.001)
+        self.k_2 = cp.Parameter(value=0.001)
 
         # # self.k_tune = -0.5 # if is tunable
         # self.k_tune = 0.0 # if is not tunable
@@ -560,9 +560,6 @@ class SSF:
         # best_gamma1, best_gamma2 = None, None
 
         # Kalman filter provided delta (variance)
-        # delta = self.delta_x  # Kalman filter provided delta (variance)
-        delta = 1 * 0.2  # Kalman filter provided delta (variance)
-
 
         # sample N points around the current state
         # N = 100
@@ -585,7 +582,6 @@ class SSF:
         g_norm    = np.linalg.norm(Lg_vec) + 1e-12     
         alpha_hs        = self.alpha * h0
 
-        
         k_out     = self.k_des(x_nom.reshape(3, 1), t)
         u_nom     = np.array([k_out["linear_cmd"], k_out["angular_cmd"]])
         proj_nom  = Lg_vec @ u_nom
@@ -601,9 +597,17 @@ class SSF:
 
         # delta    = self.delta_x
         N        = 80
-        X_pert   = x_nom + np.random.uniform(-delta, delta, size=(N, 3))
+        var_x, var_y, var_theta = 0.2, 0.3, 0.1   # example values
+        # delta = self.delta_x  # Kalman filter provided delta (variance)
+        # delta = 1 * 0.3  # Kalman filter provided delta (variance)
 
-        #   compute safe controls for all N states *vectorised*
+        deltas = np.array([var_x, var_y, var_theta])       # shape (3,)
+        delta = np.linalg.norm(deltas)
+        print(f"delta: {delta}")
+        # X_pert   = x_nom + np.random.uniform(-delta, delta, size=(N, 3))
+        X_pert = x_nom + np.random.uniform(-deltas, deltas, size=(N, 3))
+
+        #   compute safe controls for all N states, vectorized
         psi_p    = X_pert[:, 2]                        # (N,)
         cos_p    = np.cos(psi_p);  sin_p = np.sin(psi_p)
         Lg_v_p   = dhdx*cos_p + dhdy*sin_p             # (N,)
@@ -613,9 +617,27 @@ class SSF:
         rho_p    = (-Lf_h - alpha_hs
                     + gammas1_flat[None, :]*g_norm_p[:, None]
                     + gammas2_flat[None, :]*(g_norm_p**2)[:, None])
-        proj_p   = (g_vec_p @ u_nom)[:, None]          # (N,1)
+        # proj_p   = (g_vec_p @ u_nom)[:, None]          # (N,1)
+        # gain_p   = np.maximum(rho_p - proj_p, 0.0) / (g_norm_p**2)[:,None]
+        # U_pert   = u_nom + gain_p[..., None]*g_vec_p[:,None,:]   # (N,3600,2)
+
+        k_out_p = self.k_des(X_pert.T, t)                  # dict of two (N,) arrays
+
+        u_nom_p = np.array([
+            [ self.k_des(X_pert[i].reshape(3, 1), t)["linear_cmd"],
+            self.k_des(X_pert[i].reshape(3, 1), t)["angular_cmd"] ]
+            for i in range(N)
+        ]) 
+
+        # projection ⟨L_g h , u_nom_p⟩  for every sample
+        proj_p  = (g_vec_p * u_nom_p).sum(axis=1)[:, None]
+        # proj_p = (g_vec_p * u_nom_p).sum(axis=1)[:, None]   # shape (N,1)
         gain_p   = np.maximum(rho_p - proj_p, 0.0) / (g_norm_p**2)[:,None]
-        U_pert   = u_nom + gain_p[..., None]*g_vec_p[:,None,:]   # (N,3600,2)
+
+        # safe control for every (sample, gamma-pair)
+        U_pert  = u_nom_p[:, None, :] + gain_p[..., None] * g_vec_p[:, None, :]
+
+        # U_pert = u_nom_p[:, None, :] + gain_p[..., None] * g_vec_p[:, None, :]
 
         diff     = U_nom[None, :, :] - U_pert          # (N,3600,2)
         sigma_max= np.linalg.norm(diff, axis=2).max(axis=0)      # (3600,)
@@ -626,14 +648,14 @@ class SSF:
         cost[~np.isfinite(cost)] = 1e6
         best     = np.nanargmin(cost)
 
-        self.k_1.value = 1 * float(gammas1_flat[best])
-        self.k_2.value = 1 * float(gammas2_flat[best])
+        self.k_1.value = float(gammas1_flat[best])  
+        self.k_2.value = float(gammas2_flat[best]) 
 
         # to use constant, or zero parameters
-        # self.k_1.value = 0 * float(gammas1_flat[best]) + 0 * 0.3 
+        # self.k_1.value = 0 * float(gammas1_flat[best]) + 1 * 0.4 
         # self.k_2.value = 0 * float(gammas2_flat[best]) + 0 * 0.0
 
-        print(f"k_1.value: {self.k_1.value}, k_2.value: {self.k_2.value}")
+        # print(f"k_1.value: {self.k_1.value}, k_2.value: {self.k_2.value}")
 
 
         # for gamma1 in gamma_vals:
